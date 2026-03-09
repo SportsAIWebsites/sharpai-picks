@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
 SharpAI Daily Picks Generator
-Fetches odds from The Odds API, sends to Claude, generates HTML site
+Fetches odds from The Odds API, sends to Google Gemini, generates HTML site
 """
 
 import os
 import json
 import requests
-import anthropic
 from datetime import datetime, timezone
 from pathlib import Path
 
 # ── API Keys (set as GitHub Secrets) ──────────────────────────────────────────
-ODDS_API_KEY   = os.environ["ODDS_API_KEY"]
-ANTHROPIC_KEY  = os.environ["ANTHROPIC_API_KEY"]
+ODDS_API_KEY  = os.environ["ODDS_API_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
 # ── Sports to fetch ────────────────────────────────────────────────────────────
 SPORTS = [
@@ -50,7 +49,7 @@ def fetch_odds(sport: str) -> list[dict]:
     try:
         r = requests.get(url, params=params, timeout=15)
         if r.status_code == 200:
-            return r.json()[:3]          # max 3 games per sport
+            return r.json()[:3]
         print(f"  ⚠  {sport}: HTTP {r.status_code}")
         return []
     except Exception as e:
@@ -64,7 +63,7 @@ def summarise_game(game: dict) -> str:
         f"Game: {game.get('away_team')} @ {game.get('home_team')}",
         f"Time: {game.get('commence_time', 'TBD')}",
     ]
-    for bm in game.get("bookmakers", [])[:1]:      # use first bookmaker only
+    for bm in game.get("bookmakers", [])[:1]:
         for mkt in bm.get("markets", []):
             if mkt["key"] == "h2h":
                 outcomes = {o["name"]: o["price"] for o in mkt["outcomes"]}
@@ -78,52 +77,55 @@ def summarise_game(game: dict) -> str:
     return "\n".join(lines)
 
 
-def ask_claude(games_text: str, sport_label: str) -> list[dict]:
-    """Send game data to Claude and get back structured picks."""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+def ask_gemini(games_text: str, sport_label: str) -> list[dict]:
+    """Send game data to Gemini and get back structured picks."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
-    system = """You are SharpAI, an expert sports betting analyst.
-Given game odds data, return ONLY a valid JSON array (no markdown, no explanation).
+    prompt = f"""You are SharpAI, an expert sports betting analyst.
+Given game odds data, return ONLY a valid JSON array (no markdown, no explanation, no backticks).
 Each element must have exactly these fields:
-{
-  "sport": "<sport_label>",
-  "sportLabel": "<display label>",
+{{
+  "sport": "<sport_id e.g. nba>",
+  "sportLabel": "<display label e.g. NBA>",
   "time": "<game time in ET, e.g. 7:30 PM ET>",
   "home": "<home team>",
   "away": "<away team>",
-  "line": "<spread, ML, or O/U value e.g. -5.5 or ML or O 220.5>",
+  "line": "<spread, ML, or O/U value>",
   "pickType": "<Spread | Moneyline | Over/Under>",
   "pickValue": "<full pick string e.g. Celtics -5.5>",
   "odds": "<american odds e.g. -110>",
   "confidence": "<high | med | low>",
-  "analysis": "<2-3 sentence sharp analysis, data-driven, max 180 chars>",
+  "analysis": "<2-3 sentence sharp analysis, max 180 chars>",
   "ai": "<Model confidence: XX% — based on N predictive signals>"
-}
-Return only games you have a genuine edge on. Skip games with no clear edge."""
+}}
 
-    prompt = f"""Sport: {sport_label}
+Sport: {sport_label}
 
 Games data:
 {games_text}
 
-Return a JSON array of picks for these games."""
+Return only games you have a genuine edge on. Return ONLY the JSON array, nothing else."""
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1000}
+    }
 
     try:
-        msg = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-        # strip accidental markdown fences
+        r = requests.post(url, json=payload, timeout=30)
+        if r.status_code != 200:
+            print(f"  ⚠  Gemini error: {r.status_code} {r.text[:200]}")
+            return []
+        data = r.json()
+        raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        # Strip accidental markdown fences
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
         return json.loads(raw.strip())
     except Exception as e:
-        print(f"  ⚠  Claude error for {sport_label}: {e}")
+        print(f"  ⚠  Gemini parse error for {sport_label}: {e}")
         return []
 
 
@@ -138,264 +140,437 @@ def build_html(all_picks: list[dict], date_str: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SharpAI — Daily Sports Picks</title>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<title>SharpAI — Daily Sports Picks & Arbitrage Finder</title>
 <style>
-  :root{{
-    --bg:#f7f8fa;--surface:#ffffff;--border:#e8eaee;--text:#0d1117;
-    --text-muted:#6b7280;--accent:#0057ff;--accent-light:#e8f0ff;
-    --green:#00a86b;--green-light:#e6f7f1;--red:#e63946;--red-light:#fdecea;
-    --gold:#f59e0b;--gold-light:#fef3c7;
-    --shadow:0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.04);
-    --shadow-hover:0 4px 12px rgba(0,0,0,.12),0 8px 32px rgba(0,0,0,.08);
-  }}
-  *{{margin:0;padding:0;box-sizing:border-box}}
-  body{{font-family:'Barlow',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}}
-  header{{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}}
-  .header-inner{{max-width:1280px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:64px}}
-  .logo{{display:flex;align-items:center;gap:10px;text-decoration:none}}
-  .logo-icon{{width:36px;height:36px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:18px;color:white;letter-spacing:-1px}}
-  .logo-text{{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:22px;color:var(--text);letter-spacing:.5px}}
-  .logo-text span{{color:var(--accent)}}
-  nav{{display:flex;align-items:center;gap:4px}}
-  nav a{{font-size:14px;font-weight:500;color:var(--text-muted);text-decoration:none;padding:6px 14px;border-radius:6px;transition:all .15s}}
-  nav a:hover,nav a.active{{color:var(--text);background:var(--bg)}}
-  nav a.active{{color:var(--accent);font-weight:600}}
-  .record-badge{{background:var(--green-light);color:var(--green);font-size:13px;font-weight:600;padding:5px 12px;border-radius:20px;display:flex;align-items:center;gap:6px}}
-  .record-badge::before{{content:'';width:7px;height:7px;background:var(--green);border-radius:50%;animation:pulse 2s infinite}}
-  @keyframes pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.5;transform:scale(.85)}}}}
-  .hero-band{{background:linear-gradient(135deg,#0d1117 0%,#1a2235 100%);padding:48px 24px;position:relative;overflow:hidden}}
-  .hero-band::before{{content:'';position:absolute;top:-60px;right:-60px;width:300px;height:300px;background:radial-gradient(circle,rgba(0,87,255,.2) 0%,transparent 70%);pointer-events:none}}
-  .hero-inner{{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:32px}}
-  .hero-left h1{{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:48px;color:white;line-height:1;letter-spacing:.5px;margin-bottom:8px}}
-  .hero-left h1 span{{color:var(--accent)}}
-  .hero-left p{{color:rgba(255,255,255,.55);font-size:15px;max-width:440px}}
-  .hero-stats{{display:flex;gap:32px}}
-  .hero-stat{{text-align:center}}
-  .hero-stat-num{{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:36px;color:white;line-height:1}}
-  .hero-stat-num.green{{color:var(--green)}}
-  .hero-stat-label{{font-size:12px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;margin-top:4px}}
-  .main{{max-width:1280px;margin:0 auto;padding:32px 24px;display:grid;grid-template-columns:1fr 320px;gap:28px}}
-  .section-header{{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}}
-  .section-title{{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:22px;letter-spacing:.5px;display:flex;align-items:center;gap:10px}}
-  .section-title .dot{{width:8px;height:8px;background:var(--accent);border-radius:50%}}
-  .filter-tabs{{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}}
-  .filter-tab{{padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:var(--surface);color:var(--text-muted);transition:all .15s}}
-  .filter-tab:hover{{border-color:var(--accent);color:var(--accent)}}
-  .filter-tab.active{{background:var(--accent);border-color:var(--accent);color:white}}
-  .picks-grid{{display:flex;flex-direction:column;gap:14px}}
-  .pick-card{{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 24px;box-shadow:var(--shadow);transition:all .2s;cursor:pointer;animation:fadeUp .4s ease both}}
-  .pick-card:hover{{box-shadow:var(--shadow-hover);transform:translateY(-1px);border-color:#d0d7e3}}
-  @keyframes fadeUp{{from{{opacity:0;transform:translateY(12px)}}to{{opacity:1;transform:translateY(0)}}}}
-  .pick-top{{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}}
-  .pick-meta{{display:flex;align-items:center;gap:8px}}
-  .sport-tag{{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:3px 8px;border-radius:4px}}
-  .sport-nba{{background:#fde9d3;color:#c2410c}}
-  .sport-nfl{{background:#d1fae5;color:#065f46}}
-  .sport-mlb{{background:#dbeafe;color:#1e40af}}
-  .sport-nhl{{background:#ede9fe;color:#5b21b6}}
-  .sport-soccer{{background:#fce7f3;color:#9d174d}}
-  .sport-ncaa{{background:#fef3c7;color:#92400e}}
-  .sport-wnba{{background:#f0fdf4;color:#166534}}
-  .pick-time{{font-size:12px;color:var(--text-muted);font-weight:500}}
-  .confidence-badge{{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:4px 10px;border-radius:20px}}
-  .conf-high{{background:var(--green-light);color:var(--green)}}
-  .conf-med{{background:var(--gold-light);color:var(--gold)}}
-  .conf-low{{background:#f3f4f6;color:var(--text-muted)}}
-  .pick-matchup{{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}}
-  .team{{display:flex;flex-direction:column;gap:2px}}
-  .team-name{{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:22px;letter-spacing:.3px}}
-  .team-record{{font-size:12px;color:var(--text-muted)}}
-  .vs-block{{display:flex;flex-direction:column;align-items:center;gap:4px}}
-  .vs-text{{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px}}
-  .vs-line{{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:15px;color:var(--accent);background:var(--accent-light);padding:3px 10px;border-radius:6px}}
-  .pick-recommendation{{background:var(--bg);border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px}}
-  .pick-type-label{{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);white-space:nowrap}}
-  .pick-value{{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:20px;color:var(--text)}}
-  .pick-odds{{font-size:14px;font-weight:600;color:var(--green);margin-left:auto}}
-  .pick-analysis{{font-size:13.5px;color:var(--text-muted);line-height:1.6}}
-  .pick-footer{{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}}
-  .ai-tag{{font-size:11px;font-weight:600;color:var(--accent)}}
-  .pick-actions{{display:flex;gap:8px}}
-  .btn-save{{font-size:12px;font-weight:600;color:var(--text-muted);background:none;border:1.5px solid var(--border);padding:5px 12px;border-radius:6px;cursor:pointer;transition:all .15s}}
-  .btn-save:hover{{border-color:var(--accent);color:var(--accent)}}
-  .btn-bet{{font-size:12px;font-weight:700;color:white;background:var(--accent);border:none;padding:5px 14px;border-radius:6px;cursor:pointer;transition:all .15s}}
-  .btn-bet:hover{{background:#0046d4}}
-  .sidebar{{display:flex;flex-direction:column;gap:20px}}
-  .sidebar-card{{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:var(--shadow)}}
-  .sidebar-title{{font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:17px;margin-bottom:16px}}
-  .streak-row{{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}}
-  .streak-row:last-child{{border-bottom:none}}
-  .streak-sport{{font-weight:600}}
-  .streak-pct{{font-size:12px;color:var(--text-muted);background:var(--bg);padding:2px 8px;border-radius:10px;font-weight:600}}
-  .date-bar{{display:flex;align-items:center;gap:6px;margin-bottom:20px;font-size:13px;color:var(--text-muted);font-weight:500}}
-  .date-bar strong{{color:var(--text);font-size:14px}}
-  .date-dot{{width:4px;height:4px;background:var(--border);border-radius:50%}}
-  .no-picks{{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:15px}}
-  .disclaimer{{max-width:1280px;margin:0 auto 40px;padding:0 24px;font-size:11px;color:var(--text-muted);text-align:center;line-height:1.6}}
-  @media(max-width:900px){{.main{{grid-template-columns:1fr}}.sidebar{{display:none}}.hero-stats{{display:none}}}}
+:root {{
+  --bg: #0a0e1a;
+  --surface: #111827;
+  --surface2: #1a2235;
+  --border: #1f2d45;
+  --text: #f0f4ff;
+  --muted: #5a6a85;
+  --accent: #3b82f6;
+  --accent2: #60a5fa;
+  --green: #10d98a;
+  --green-dim: rgba(16,217,138,0.12);
+  --red: #f43f5e;
+  --gold: #f59e0b;
+  --gold-dim: rgba(245,158,11,0.12);
+  --mono: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  --display: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --body: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}}
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family: var(--body); background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }}
+body::before {{
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background-image: linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}}
+header {{ position:sticky; top:0; z-index:100; background:rgba(10,14,26,0.85); backdrop-filter:blur(20px); border-bottom:1px solid var(--border); }}
+.header-inner {{ max-width:1300px; margin:0 auto; padding:0 28px; display:flex; align-items:center; justify-content:space-between; height:60px; }}
+.logo {{ display:flex; align-items:center; gap:10px; text-decoration:none; }}
+.logo-mark {{ width:34px; height:34px; border-radius:8px; background:linear-gradient(135deg,#3b82f6,#1d4ed8); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:14px; color:white; }}
+.logo-name {{ font-weight:800; font-size:18px; color:var(--text); }}
+.logo-name em {{ color:var(--accent2); font-style:normal; }}
+nav {{ display:flex; gap:2px; }}
+nav button {{ font-size:13px; font-weight:500; color:var(--muted); background:none; border:none; cursor:pointer; padding:6px 14px; border-radius:6px; transition:all .15s; }}
+nav button:hover {{ color:var(--text); background:var(--surface); }}
+nav button.active {{ color:var(--accent2); background:rgba(59,130,246,0.1); font-weight:600; }}
+.live-pill {{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--green); background:var(--green-dim); border:1px solid rgba(16,217,138,0.2); padding:5px 12px; border-radius:20px; }}
+.live-dot {{ width:6px; height:6px; background:var(--green); border-radius:50%; animation:blink 1.5s infinite; }}
+@keyframes blink {{ 0%,100%{{opacity:1}} 50%{{opacity:0.3}} }}
+.hero {{ position:relative; z-index:1; padding:56px 28px 48px; max-width:1300px; margin:0 auto; display:flex; align-items:flex-end; justify-content:space-between; gap:40px; }}
+.hero-eyebrow {{ font-size:11px; color:var(--accent2); letter-spacing:2px; text-transform:uppercase; margin-bottom:16px; }}
+.hero-title {{ font-weight:900; font-size:clamp(36px,5vw,64px); line-height:0.95; letter-spacing:-2px; margin-bottom:16px; }}
+.hero-title .line2 {{ color:var(--accent2); }}
+.hero-sub {{ font-size:15px; color:var(--muted); max-width:420px; line-height:1.6; }}
+.hero-stats {{ display:flex; gap:40px; flex-shrink:0; }}
+.stat {{ text-align:right; }}
+.stat-num {{ font-weight:900; font-size:42px; line-height:1; color:var(--green); letter-spacing:-2px; }}
+.stat-num.blue {{ color:var(--accent2); }}
+.stat-label {{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:1.5px; margin-top:4px; }}
+.tab-bar {{ position:relative; z-index:1; max-width:1300px; margin:0 auto; padding:0 28px; display:flex; border-bottom:1px solid var(--border); margin-bottom:36px; }}
+.tab-btn {{ font-size:13px; font-weight:600; color:var(--muted); background:none; border:none; border-bottom:2px solid transparent; padding:14px 20px; cursor:pointer; transition:all .15s; display:flex; align-items:center; gap:8px; margin-bottom:-1px; }}
+.tab-btn:hover {{ color:var(--text); }}
+.tab-btn.active {{ color:var(--accent2); border-bottom-color:var(--accent2); }}
+.tab-chip {{ font-size:10px; font-weight:700; padding:2px 7px; border-radius:4px; text-transform:uppercase; letter-spacing:.5px; }}
+.chip-free {{ background:var(--green-dim); color:var(--green); border:1px solid rgba(16,217,138,0.25); }}
+.chip-lock {{ background:rgba(59,130,246,0.15); color:var(--accent2); border:1px solid rgba(59,130,246,0.3); }}
+.layout {{ position:relative; z-index:1; max-width:1300px; margin:0 auto; padding:0 28px 60px; display:grid; grid-template-columns:1fr 300px; gap:24px; }}
+.layout.full {{ grid-template-columns:1fr; }}
+.section-label {{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:2px; margin-bottom:16px; display:flex; align-items:center; gap:10px; }}
+.section-label::after {{ content:''; flex:1; height:1px; background:var(--border); }}
+.filter-row {{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }}
+.fpill {{ font-size:11px; font-weight:500; padding:5px 12px; border-radius:20px; cursor:pointer; border:1px solid var(--border); background:none; color:var(--muted); transition:all .15s; text-transform:uppercase; letter-spacing:.5px; }}
+.fpill:hover {{ border-color:var(--accent); color:var(--accent2); }}
+.fpill.on {{ background:var(--accent); border-color:var(--accent); color:white; }}
+.picks-list {{ display:flex; flex-direction:column; gap:12px; }}
+.pick-card {{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px 22px; transition:all .2s; animation:up .35s ease both; position:relative; overflow:hidden; }}
+.pick-card::before {{ content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); border-radius:3px 0 0 3px; opacity:0; transition:opacity .2s; }}
+.pick-card:hover {{ border-color:#2d3f5e; transform:translateY(-1px); box-shadow:0 8px 32px rgba(0,0,0,0.4); }}
+.pick-card:hover::before {{ opacity:1; }}
+.pick-card.hot::before {{ opacity:1; background:var(--green); }}
+@keyframes up {{ from{{opacity:0;transform:translateY(10px)}} to{{opacity:1;transform:translateY(0)}} }}
+.card-top {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }}
+.card-tags {{ display:flex; align-items:center; gap:8px; }}
+.sport-pill {{ font-size:10px; font-weight:500; padding:3px 8px; border-radius:4px; text-transform:uppercase; letter-spacing:.5px; }}
+.sp-nba{{background:rgba(255,107,53,0.15);color:#ff6b35;border:1px solid rgba(255,107,53,0.25)}}
+.sp-nhl{{background:rgba(99,179,237,0.15);color:#63b3ed;border:1px solid rgba(99,179,237,0.25)}}
+.sp-mlb{{background:rgba(72,187,120,0.15);color:#48bb78;border:1px solid rgba(72,187,120,0.25)}}
+.sp-ncaa{{background:rgba(246,173,85,0.15);color:#f6ad55;border:1px solid rgba(246,173,85,0.25)}}
+.sp-soccer{{background:rgba(154,117,234,0.15);color:#9a75ea;border:1px solid rgba(154,117,234,0.25)}}
+.sp-wnba{{background:rgba(252,129,178,0.15);color:#fc81b2;border:1px solid rgba(252,129,178,0.25)}}
+.game-time {{ font-size:11px; color:var(--muted); }}
+.conf-badge {{ font-size:10px; font-weight:500; padding:3px 10px; border-radius:20px; text-transform:uppercase; letter-spacing:.5px; }}
+.conf-high {{ background:var(--green-dim); color:var(--green); border:1px solid rgba(16,217,138,0.25); }}
+.conf-med {{ background:var(--gold-dim); color:var(--gold); border:1px solid rgba(245,158,11,0.25); }}
+.conf-low {{ background:rgba(90,106,133,0.15); color:var(--muted); border:1px solid var(--border); }}
+.matchup {{ display:flex; align-items:center; gap:12px; margin-bottom:14px; }}
+.team-name {{ font-weight:800; font-size:18px; letter-spacing:-0.5px; flex:1; }}
+.team-name.away {{ text-align:left; }}
+.team-name.home {{ text-align:right; }}
+.vs-center {{ display:flex; flex-direction:column; align-items:center; gap:4px; flex-shrink:0; }}
+.vs-txt {{ font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }}
+.line-badge {{ font-size:12px; font-weight:500; color:var(--accent2); background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); padding:3px 10px; border-radius:6px; white-space:nowrap; }}
+.pick-row {{ display:flex; align-items:center; gap:10px; background:var(--surface2); border-radius:8px; padding:10px 14px; margin-bottom:12px; }}
+.pick-type {{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; white-space:nowrap; }}
+.pick-val {{ font-weight:800; font-size:17px; flex:1; }}
+.pick-odds {{ font-size:13px; color:var(--green); font-weight:500; margin-left:auto; }}
+.analysis {{ font-size:13px; color:var(--muted); line-height:1.65; margin-bottom:14px; }}
+.card-footer {{ display:flex; align-items:center; justify-content:space-between; padding-top:12px; border-top:1px solid var(--border); }}
+.ai-signal {{ font-size:10px; color:var(--accent2); opacity:.7; }}
+.card-actions {{ display:flex; gap:8px; }}
+.btn-sm {{ font-size:12px; font-weight:600; padding:5px 12px; border-radius:6px; cursor:pointer; transition:all .15s; border:none; }}
+.btn-ghost {{ background:none; border:1px solid var(--border); color:var(--muted); }}
+.btn-ghost:hover {{ border-color:var(--accent); color:var(--accent2); }}
+.btn-primary {{ background:var(--accent); color:white; }}
+.locked-card {{ background:var(--surface); border:1px dashed var(--border); border-radius:12px; padding:36px 24px; text-align:center; }}
+.lock-icon {{ font-size:28px; margin-bottom:12px; opacity:.5; }}
+.lock-title {{ font-weight:800; font-size:20px; margin-bottom:8px; }}
+.lock-sub {{ font-size:13px; color:var(--muted); margin-bottom:20px; line-height:1.6; }}
+.btn-unlock {{ font-weight:700; font-size:13px; background:linear-gradient(135deg,var(--accent),#1d4ed8); color:white; border:none; padding:10px 24px; border-radius:8px; cursor:pointer; }}
+.sidebar {{ display:flex; flex-direction:column; gap:16px; }}
+.side-card {{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; }}
+.side-title {{ font-weight:800; font-size:15px; margin-bottom:14px; }}
+.side-row {{ display:flex; align-items:center; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px; }}
+.side-row:last-child {{ border-bottom:none; }}
+.side-label {{ font-weight:500; }}
+.side-val {{ font-size:11px; color:var(--muted); background:var(--surface2); padding:2px 8px; border-radius:6px; }}
+.promo-card {{ background:linear-gradient(135deg,#1a2a4a,#0f1e38); border:1px solid rgba(59,130,246,0.3); border-radius:12px; padding:18px; }}
+.promo-title {{ font-weight:800; font-size:16px; margin-bottom:6px; }}
+.promo-sub {{ font-size:12px; color:var(--muted); margin-bottom:14px; line-height:1.5; }}
+.btn-promo {{ width:100%; background:var(--accent); color:white; border:none; padding:10px; border-radius:8px; font-size:13px; font-weight:700; cursor:pointer; }}
+.arb-info {{ background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.2); border-radius:10px; padding:14px 18px; margin-bottom:20px; font-size:13px; color:var(--muted); line-height:1.6; }}
+.arb-info strong {{ color:var(--accent2); }}
+.arb-toolbar {{ display:flex; align-items:center; gap:12px; margin-bottom:20px; }}
+.btn-refresh {{ font-weight:700; font-size:12px; background:var(--accent); color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:6px; }}
+.btn-refresh.spinning .spin-icon {{ animation:spin .7s linear infinite; }}
+@keyframes spin {{ to{{transform:rotate(360deg)}} }}
+.arb-ts {{ font-size:11px; color:var(--muted); }}
+.arb-card {{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px 22px; margin-bottom:12px; animation:up .35s ease both; transition:all .2s; }}
+.arb-card:hover {{ border-color:#2d3f5e; transform:translateY(-1px); }}
+.arb-card.premium {{ border-color:rgba(16,217,138,0.4); }}
+.arb-head {{ display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; }}
+.arb-game-name {{ font-weight:800; font-size:18px; margin-bottom:4px; }}
+.arb-meta {{ font-size:11px; color:var(--muted); }}
+.profit-block {{ text-align:right; flex-shrink:0; }}
+.profit-num {{ font-weight:900; font-size:32px; color:var(--green); line-height:1; }}
+.profit-label {{ font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }}
+.arb-legs {{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }}
+.arb-leg {{ background:var(--surface2); border-radius:8px; padding:12px 14px; }}
+.leg-book {{ font-size:9px; font-weight:500; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; padding:2px 7px; border-radius:4px; display:inline-block; }}
+.bk-fd{{background:rgba(0,120,255,0.15);color:#60a5fa;border:1px solid rgba(0,120,255,0.25)}}
+.bk-dk{{background:rgba(255,165,0,0.15);color:#fbbf24;border:1px solid rgba(255,165,0,0.25)}}
+.bk-fn{{background:rgba(255,50,100,0.15);color:#f87171;border:1px solid rgba(255,50,100,0.25)}}
+.bk-cz{{background:rgba(50,200,100,0.15);color:#4ade80;border:1px solid rgba(50,200,100,0.25)}}
+.bk-b365{{background:rgba(150,100,255,0.15);color:#c084fc;border:1px solid rgba(150,100,255,0.25)}}
+.bk-default{{background:rgba(90,106,133,0.15);color:var(--muted);border:1px solid var(--border)}}
+.leg-pick {{ font-weight:600; font-size:14px; margin-bottom:3px; }}
+.leg-odds {{ font-size:13px; color:var(--accent2); }}
+.leg-stake {{ font-size:11px; color:var(--green); margin-top:4px; }}
+.arb-summary {{ background:var(--green-dim); border:1px solid rgba(16,217,138,0.2); border-radius:8px; padding:12px 16px; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }}
+.sum-item {{ text-align:center; }}
+.sum-num {{ font-weight:800; font-size:18px; color:var(--green); }}
+.sum-label {{ font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:2px; }}
+.arb-empty {{ text-align:center; padding:60px 20px; }}
+.arb-empty-icon {{ font-size:40px; margin-bottom:12px; opacity:.4; }}
+.arb-empty-title {{ font-weight:800; font-size:20px; margin-bottom:8px; color:var(--muted); }}
+.arb-empty-sub {{ font-size:13px; color:var(--muted); line-height:1.6; }}
+.overlay {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); backdrop-filter:blur(8px); z-index:1000; align-items:center; justify-content:center; }}
+.overlay.open {{ display:flex; }}
+.modal {{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:36px; width:100%; max-width:420px; margin:24px; position:relative; }}
+.modal-close {{ position:absolute; top:16px; right:16px; background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; }}
+.modal-eyebrow {{ font-size:10px; color:var(--accent2); text-transform:uppercase; letter-spacing:2px; margin-bottom:8px; }}
+.modal-title {{ font-weight:900; font-size:28px; margin-bottom:6px; }}
+.modal-sub {{ font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:20px; }}
+.perks {{ background:var(--surface2); border-radius:8px; padding:14px 16px; margin-bottom:22px; }}
+.perk {{ display:flex; align-items:center; gap:8px; font-size:13px; padding:4px 0; }}
+.perk-icon {{ color:var(--green); font-size:12px; }}
+.field-group {{ margin-bottom:14px; }}
+.field-label {{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; display:block; }}
+.field-input {{ width:100%; padding:10px 14px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); color:var(--text); font-size:14px; outline:none; }}
+.field-input:focus {{ border-color:var(--accent); }}
+.btn-full {{ width:100%; background:linear-gradient(135deg,var(--accent),#1d4ed8); color:white; border:none; padding:13px; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; margin-top:4px; }}
+.modal-fine {{ font-size:11px; color:var(--muted); text-align:center; margin-top:12px; }}
+.success-wrap {{ text-align:center; padding:12px 0; }}
+.success-emoji {{ font-size:48px; margin-bottom:12px; }}
+.success-title {{ font-weight:900; font-size:26px; color:var(--green); margin-bottom:8px; }}
+.success-sub {{ font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:20px; }}
+.unlock-banner {{ background:linear-gradient(135deg,#1a2a4a,#0f1e38); border:1px solid rgba(59,130,246,0.3); border-radius:12px; padding:18px 22px; display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }}
+.ub-text h3 {{ font-weight:800; font-size:17px; margin-bottom:4px; }}
+.ub-text p {{ font-size:12px; color:var(--muted); }}
+.btn-ub {{ background:var(--accent); color:white; border:none; padding:9px 18px; border-radius:7px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap; }}
+@media(max-width:860px){{.layout{{grid-template-columns:1fr}}.sidebar{{display:none}}.hero{{flex-direction:column;gap:24px}}}}
 </style>
 </head>
 <body>
+<div class="overlay" id="modal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modal-form">
+      <div class="modal-eyebrow">Free Access</div>
+      <div class="modal-title">Unlock Premium Picks</div>
+      <div class="modal-sub">Get every AI pick, every day. Completely free — no credit card ever.</div>
+      <div class="perks">
+        <div class="perk"><span class="perk-icon">✓</span> All daily picks unlocked instantly</div>
+        <div class="perk"><span class="perk-icon">✓</span> High confidence picks highlighted</div>
+        <div class="perk"><span class="perk-icon">✓</span> Updated every morning at 9AM ET</div>
+        <div class="perk"><span class="perk-icon">✓</span> No credit card, no spam, ever</div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Email Address</label>
+        <input class="field-input" type="email" id="inp-email" placeholder="you@example.com">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Phone Number</label>
+        <input class="field-input" type="tel" id="inp-phone" placeholder="+1 (555) 000-0000">
+      </div>
+      <button class="btn-full" onclick="doSubscribe()">Unlock All Picks →</button>
+      <div class="modal-fine">Your info stays private. Unsubscribe anytime.</div>
+    </div>
+    <div id="modal-success" style="display:none">
+      <div class="success-wrap">
+        <div class="success-emoji">🎉</div>
+        <div class="success-title">You're In!</div>
+        <div class="success-sub">All picks are now unlocked. Welcome to SharpAI.</div>
+        <button class="btn-full" onclick="closeModal()">View All Picks →</button>
+      </div>
+    </div>
+  </div>
+</div>
 <header>
   <div class="header-inner">
-    <a class="logo" href="#">
-      <div class="logo-icon">SA</div>
-      <span class="logo-text">Sharp<span>AI</span></span>
-    </a>
+    <a class="logo" href="#"><div class="logo-mark">SA</div><span class="logo-name">Sharp<em>AI</em></span></a>
     <nav>
-      <a href="#" class="active">Today's Picks</a>
-      <a href="#">Parlays</a>
-      <a href="#">Records</a>
-      <a href="#">Props</a>
+      <button class="active" onclick="goTab('picks')" id="nav-picks">Picks</button>
+      <button onclick="goTab('arb')" id="nav-arb">Arbitrage</button>
     </nav>
-    <div class="record-badge">Live · AI Picks Updated Daily</div>
+    <div class="live-pill" id="sub-pill" style="display:none">✓ Premium</div>
+    <div class="live-pill" id="live-pill"><div class="live-dot"></div>Live</div>
   </div>
 </header>
-
-<div class="hero-band">
-  <div class="hero-inner">
-    <div class="hero-left">
-      <h1>AI-POWERED<br><span>DAILY PICKS</span></h1>
-      <p>Real odds. Real analysis. Machine learning across every major sport — updated every morning at 9AM ET.</p>
-    </div>
-    <div class="hero-stats">
-      <div class="hero-stat">
-        <div class="hero-stat-num green" id="stat-total">{total}</div>
-        <div class="hero-stat-label">Today's Picks</div>
-      </div>
-      <div class="hero-stat">
-        <div class="hero-stat-num green" id="stat-high">{high_conf}</div>
-        <div class="hero-stat-label">High Confidence</div>
-      </div>
-      <div class="hero-stat">
-        <div class="hero-stat-num">7</div>
-        <div class="hero-stat-label">Sports Covered</div>
-      </div>
-    </div>
+<div class="hero">
+  <div class="hero-left">
+    <div class="hero-eyebrow">AI · Sports · Arbitrage</div>
+    <div class="hero-title">SHARP<br><span class="line2">PICKS DAILY</span></div>
+    <div class="hero-sub">Real odds. Real analysis. Live arbitrage across FanDuel, DraftKings, Fanatics, Caesars &amp; Bet365.</div>
+  </div>
+  <div class="hero-stats">
+    <div class="stat"><div class="stat-num" id="h-picks">{total}</div><div class="stat-label">Today's Picks</div></div>
+    <div class="stat"><div class="stat-num blue" id="h-arb">—</div><div class="stat-label">Arb Opps</div></div>
+    <div class="stat"><div class="stat-num blue">5</div><div class="stat-label">Sportsbooks</div></div>
   </div>
 </div>
-
-<div class="main">
-  <div class="picks-col">
-    <div class="date-bar">
-      <strong>{date_str}</strong>
-      <div class="date-dot"></div>
-      <span>{total} picks generated</span>
-      <div class="date-dot"></div>
-      <span>Powered by Claude AI + Live Odds</span>
+<div class="tab-bar">
+  <button class="tab-btn active" id="tab-picks" onclick="goTab('picks')">📊 Today's Picks <span class="tab-chip chip-free">2 Free/Day</span></button>
+  <button class="tab-btn" id="tab-arb" onclick="goTab('arb')">⚡ Arbitrage Finder <span class="tab-chip chip-free">Free</span></button>
+  <button class="tab-btn" onclick="openModal()">🏆 Premium Picks <span class="tab-chip chip-lock">Unlock Free</span></button>
+</div>
+<div class="layout" id="sec-picks">
+  <div>
+    <div id="unlock-banner-slot"></div>
+    <div class="section-label">{date_str} · <span id="picks-sub-label">2 of {total} picks shown</span></div>
+    <div class="filter-row">
+      <button class="fpill on" onclick="doFilter('all',this)">All</button>
+      <button class="fpill" onclick="doFilter('nba',this)">NBA</button>
+      <button class="fpill" onclick="doFilter('nhl',this)">NHL</button>
+      <button class="fpill" onclick="doFilter('mlb',this)">MLB</button>
+      <button class="fpill" onclick="doFilter('ncaa',this)">College</button>
+      <button class="fpill" onclick="doFilter('soccer',this)">Soccer</button>
+      <button class="fpill" onclick="doFilter('wnba',this)">WNBA</button>
     </div>
-    <div class="section-header">
-      <div class="section-title"><div class="dot"></div> Today's Picks</div>
-    </div>
-    <div class="filter-tabs">
-      <div class="filter-tab active" onclick="filterPicks('all',this)">All Sports</div>
-      <div class="filter-tab" onclick="filterPicks('nfl',this)">NFL</div>
-      <div class="filter-tab" onclick="filterPicks('nba',this)">NBA</div>
-      <div class="filter-tab" onclick="filterPicks('mlb',this)">MLB</div>
-      <div class="filter-tab" onclick="filterPicks('nhl',this)">NHL</div>
-      <div class="filter-tab" onclick="filterPicks('soccer',this)">Soccer</div>
-      <div class="filter-tab" onclick="filterPicks('ncaa',this)">College</div>
-      <div class="filter-tab" onclick="filterPicks('wnba',this)">Women's</div>
-    </div>
-    <div class="picks-grid" id="picks-grid"></div>
+    <div class="picks-list" id="picks-list"></div>
   </div>
   <div class="sidebar">
-    <div class="sidebar-card">
-      <div class="sidebar-title">📊 Today by Sport</div>
-      <div id="sport-breakdown"></div>
-    </div>
-    <div class="sidebar-card">
-      <div class="sidebar-title">🔥 High Confidence Picks</div>
-      <div id="high-conf-list"></div>
+    <div class="side-card"><div class="side-title">Today by Sport</div><div id="sport-rows"></div></div>
+    <div class="side-card"><div class="side-title">🔥 High Confidence</div><div id="hc-rows"></div></div>
+    <div class="promo-card">
+      <div class="promo-title">Unlock All {total} Picks</div>
+      <div class="promo-sub">Free forever. No credit card.</div>
+      <button class="btn-promo" onclick="openModal()">Subscribe Free →</button>
     </div>
   </div>
 </div>
-
-<div class="disclaimer">
-  SharpAI is for entertainment purposes only. We do not encourage illegal gambling. Please gamble responsibly. If you or someone you know has a gambling problem, call 1-800-522-4700.
+<div class="layout full" id="sec-arb" style="display:none">
+  <div class="arb-info"><strong>What is arbitrage betting?</strong> When sportsbooks disagree on odds enough that you can bet both sides and guarantee a profit. SharpAI scans 5 major books in real time to find these gaps.</div>
+  <div class="arb-toolbar">
+    <button class="btn-refresh" id="refresh-btn" onclick="loadArb()"><span class="spin-icon">↻</span> Refresh Odds</button>
+    <span class="arb-ts" id="arb-ts">Enter your Odds API key below to scan live odds</span>
+  </div>
+  <div id="api-key-setup" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;margin-bottom:20px;max-width:560px;">
+    <div style="font-weight:800;font-size:20px;margin-bottom:8px;">⚡ Connect Live Odds</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.6;">Paste your free Odds API key to start scanning all 5 sportsbooks for live arbitrage opportunities.</div>
+    <div style="display:flex;gap:10px;">
+      <input id="api-key-input" class="field-input" type="text" placeholder="Paste your Odds API key here..." style="flex:1">
+      <button onclick="saveApiKey()" style="background:var(--accent);color:white;border:none;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Save & Scan</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:10px;">Get a free key at <strong style="color:var(--accent2)">the-odds-api.com</strong></div>
+  </div>
+  <div id="arb-grid"></div>
 </div>
-
+<div style="text-align:center;padding:0 28px 40px;font-size:11px;color:var(--muted);max-width:1300px;margin:0 auto;position:relative;z-index:1">
+  SharpAI is for entertainment purposes only. We do not encourage illegal gambling. Please gamble responsibly. Problem gambling helpline: 1-800-522-4700.
+</div>
 <script>
-const picks = {picks_json};
+let subscriber = localStorage.getItem('sa_sub') === '1';
+let oddsKey = localStorage.getItem('sa_odds_key') || '';
+let activeFilter = 'all';
+const PICKS = {picks_json};
 
-function sportClass(s){{
-  const m={{'nba':'sport-nba','nfl':'sport-nfl','mlb':'sport-mlb','nhl':'sport-nhl','soccer':'sport-soccer','ncaa':'sport-ncaa','wnba':'sport-wnba'}};
-  return m[s]||'sport-nba';
+function sportClass(s){{ return {{nba:'sp-nba',nhl:'sp-nhl',mlb:'sp-mlb',ncaa:'sp-ncaa',soccer:'sp-soccer',wnba:'sp-wnba'}}[s]||'sp-nba'; }}
+function confClass(c){{ return c==='high'?'conf-high':c==='med'?'conf-med':'conf-low'; }}
+function confLabel(c){{ return c==='high'?'🔥 High':'⚡ Med'; }}
+
+function pickHTML(p,i){{
+  return `<div class="pick-card ${{p.conf==='high'?'hot':''}}" style="animation-delay:${{i*.06}}s">
+    <div class="card-top"><div class="card-tags"><span class="sport-pill ${{sportClass(p.sport)}}">${{p.sportLabel}}</span><span class="game-time">${{p.time}}</span></div><span class="conf-badge ${{confClass(p.conf)}}">${{confLabel(p.conf)}}</span></div>
+    <div class="matchup"><div class="team-name away">${{p.away}}</div><div class="vs-center"><span class="vs-txt">@</span><span class="line-badge">${{p.line}}</span></div><div class="team-name home">${{p.home}}</div></div>
+    <div class="pick-row"><span class="pick-type">${{p.pickType}}</span><span class="pick-val">${{p.pickValue}}</span><span class="pick-odds">${{p.odds}}</span></div>
+    <div class="analysis">${{p.analysis}}</div>
+    <div class="card-footer"><span class="ai-signal">${{p.ai}}</span><div class="card-actions"><button class="btn-sm btn-ghost">Save</button><button class="btn-sm btn-primary">Bet →</button></div></div>
+  </div>`;
 }}
-function confClass(c){{return c==='high'?'conf-high':c==='med'?'conf-med':'conf-low';}}
-function confLabel(c){{return c==='high'?'🔥 High Confidence':c==='med'?'⚡ Medium':'Low Confidence';}}
+
+function lockedHTML(){{
+  return `<div class="locked-card"><div class="lock-icon">🔒</div><div class="lock-title">More Picks Locked</div><div class="lock-sub">Subscribe free to unlock all ${{PICKS.length}} picks today.</div><button class="btn-unlock" onclick="openModal()">Unlock Free →</button></div>`;
+}}
 
 function renderPicks(filter){{
-  const grid=document.getElementById('picks-grid');
-  const list=filter==='all'?picks:picks.filter(p=>p.sport===filter);
-  if(!list.length){{grid.innerHTML='<div class="no-picks">No picks available for this sport today.</div>';return;}}
-  grid.innerHTML=list.map((p,i)=>`
-    <div class="pick-card" style="animation-delay:${{i*0.06}}s">
-      <div class="pick-top">
-        <div class="pick-meta">
-          <span class="sport-tag ${{sportClass(p.sport)}}">${{p.sportLabel}}</span>
-          <span class="pick-time">${{p.time}}</span>
-        </div>
-        <div class="confidence-badge ${{confClass(p.confidence)}}">${{confLabel(p.confidence)}}</div>
-      </div>
-      <div class="pick-matchup">
-        <div class="team"><div class="team-name">${{p.away}}</div></div>
-        <div class="vs-block"><span class="vs-text">vs</span><span class="vs-line">${{p.line}}</span></div>
-        <div class="team" style="text-align:right"><div class="team-name">${{p.home}}</div></div>
-      </div>
-      <div class="pick-recommendation">
-        <span class="pick-type-label">${{p.pickType}}</span>
-        <span class="pick-value">${{p.pickValue}}</span>
-        <span class="pick-odds">${{p.odds}}</span>
-      </div>
-      <div class="pick-analysis">${{p.analysis}}</div>
-      <div class="pick-footer">
-        <span class="ai-tag">${{p.ai}}</span>
-        <div class="pick-actions">
-          <button class="btn-save">Save</button>
-          <button class="btn-bet">Bet This Pick →</button>
-        </div>
-      </div>
-    </div>
-  `).join('');
+  activeFilter=filter;
+  const list=document.getElementById('picks-list');
+  let filtered=filter==='all'?PICKS:PICKS.filter(p=>p.sport===filter);
+  if(!filtered.length){{list.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">No picks for this sport today.</div>';return;}}
+  if(subscriber){{list.innerHTML=filtered.map((p,i)=>pickHTML(p,i)).join('');}}
+  else{{const free=filtered.slice(0,2),rest=filtered.slice(2);list.innerHTML=free.map((p,i)=>pickHTML(p,i)).join('')+(rest.length?lockedHTML():'');}}
 }}
 
-function filterPicks(sport,el){{
-  document.querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
-  renderPicks(sport);
+function doFilter(f,el){{document.querySelectorAll('.fpill').forEach(b=>b.classList.remove('on'));el.classList.add('on');renderPicks(f);}}
+
+function buildSidebar(){{
+  const counts={{}};PICKS.forEach(p=>{{counts[p.sportLabel]=(counts[p.sportLabel]||0)+1;}});
+  document.getElementById('sport-rows').innerHTML=Object.entries(counts).map(([l,n])=>`<div class="side-row"><span class="side-label">${{l}}</span><span class="side-val">${{n}} pick${{n>1?'s':''}}</span></div>`).join('');
+  const hc=PICKS.filter(p=>p.confidence==='high');
+  document.getElementById('hc-rows').innerHTML=hc.map(p=>`<div class="side-row"><span class="side-label">${{p.pickValue}}</span><span class="side-val">${{p.odds}}</span></div>`).join('');
 }}
 
-// Sport breakdown sidebar
-const counts={{}};
-picks.forEach(p=>{{counts[p.sportLabel]=(counts[p.sportLabel]||0)+1;}});
-document.getElementById('sport-breakdown').innerHTML=
-  Object.entries(counts).map(([s,n])=>`
-    <div class="streak-row">
-      <span class="streak-sport">${{s}}</span>
-      <span class="streak-pct">${{n}} pick${{n>1?'s':''}}</span>
-    </div>`).join('');
+function updateBanner(){{
+  const slot=document.getElementById('unlock-banner-slot'),lbl=document.getElementById('picks-sub-label');
+  if(subscriber){{slot.innerHTML='';lbl.textContent=`All ${{PICKS.length}} picks unlocked`;}}
+  else{{slot.innerHTML=`<div class="unlock-banner"><div class="ub-text"><h3>🔒 ${{PICKS.length-2}} More Picks Available</h3><p>Subscribe free — no credit card needed.</p></div><button class="btn-ub" onclick="openModal()">Unlock Free →</button></div>`;lbl.textContent=`2 of ${{PICKS.length}} picks shown`;}}
+}}
 
-// High confidence sidebar
-const high=picks.filter(p=>p.confidence==='high');
-document.getElementById('high-conf-list').innerHTML=high.length
-  ? high.map(p=>`<div class="streak-row"><span class="streak-sport">${{p.pickValue}}</span><span class="streak-pct">${{p.odds}}</span></div>`).join('')
-  : '<div style="font-size:13px;color:var(--text-muted);padding:8px 0">No high confidence picks today.</div>';
+function goTab(t){{
+  document.getElementById('sec-picks').style.display=t==='picks'?'grid':'none';
+  document.getElementById('sec-arb').style.display=t==='arb'?'block':'none';
+  document.getElementById('tab-picks').classList.toggle('active',t==='picks');
+  document.getElementById('tab-arb').classList.toggle('active',t==='arb');
+  document.getElementById('nav-picks').classList.toggle('active',t==='picks');
+  document.getElementById('nav-arb').classList.toggle('active',t==='arb');
+  if(t==='arb'&&oddsKey)loadArb();
+}}
 
-renderPicks('all');
+function openModal(){{document.getElementById('modal').classList.add('open');}}
+function closeModal(){{document.getElementById('modal').classList.remove('open');}}
+document.getElementById('modal').addEventListener('click',function(e){{if(e.target===this)closeModal();}});
+
+function doSubscribe(){{
+  const email=document.getElementById('inp-email').value.trim(),phone=document.getElementById('inp-phone').value.trim();
+  if(!email||!email.includes('@')){{alert('Please enter a valid email.');return;}}
+  if(!phone){{alert('Please enter your phone number.');return;}}
+  localStorage.setItem('sa_sub','1');localStorage.setItem('sa_email',email);localStorage.setItem('sa_phone',phone);
+  subscriber=true;
+  document.getElementById('modal-form').style.display='none';document.getElementById('modal-success').style.display='block';
+  updateBanner();renderPicks(activeFilter);
+  document.getElementById('sub-pill').style.display='flex';document.getElementById('live-pill').style.display='none';
+}}
+
+function saveApiKey(){{
+  const k=document.getElementById('api-key-input').value.trim();
+  if(!k){{alert('Please paste your Odds API key.');return;}}
+  localStorage.setItem('sa_odds_key',k);oddsKey=k;
+  document.getElementById('api-key-setup').style.display='none';loadArb();
+}}
+
+const BOOKS=['fanduel','draftkings','fanatics','caesars','betmgm'];
+const BOOK_NAMES={{fanduel:'FanDuel',draftkings:'DraftKings',fanatics:'Fanatics',caesars:'Caesars',betmgm:'Bet365'}};
+const BOOK_CSS={{fanduel:'bk-fd',draftkings:'bk-dk',fanatics:'bk-fn',caesars:'bk-cz',betmgm:'bk-b365'}};
+function toDecimal(a){{a=parseFloat(a);return a>0?(a/100)+1:(100/Math.abs(a))+1;}}
+
+function findArbs(games){{
+  const opps=[];
+  for(const g of games){{
+    const best={{}};
+    for(const bm of g.bookmakers){{
+      if(!BOOKS.includes(bm.key))continue;
+      const mkt=bm.markets.find(m=>m.key==='h2h');if(!mkt)continue;
+      for(const o of mkt.outcomes){{if(!best[o.name]||toDecimal(o.price)>toDecimal(best[o.name].odds))best[o.name]={{book:bm.key,odds:o.price}};}}
+    }}
+    const teams=Object.keys(best);if(teams.length<2)continue;
+    const impl=teams.reduce((s,t)=>s+(1/toDecimal(best[t].odds)),0);
+    if(impl<1.0){{
+      const pct=((1/impl)-1)*100;
+      const legs=teams.map(t=>{{return{{team:t,book:best[t].book,odds:best[t].odds,stake:((1/toDecimal(best[t].odds))/impl*100).toFixed(2)}}}});
+      opps.push({{game:`${{g.away_team}} @ ${{g.home_team}}`,sport:(g.sport_key||'').split('_').pop().toUpperCase(),time:new Date(g.commence_time).toLocaleTimeString('en-US',{{hour:'numeric',minute:'2-digit',timeZoneName:'short'}}),pct:pct.toFixed(2),impl:(impl*100).toFixed(1),profit:(100/impl-100).toFixed(2),legs}});
+    }}
+  }}
+  return opps.sort((a,b)=>b.pct-a.pct);
+}}
+
+async function loadArb(){{
+  if(!oddsKey)return;
+  const grid=document.getElementById('arb-grid'),ts=document.getElementById('arb-ts'),btn=document.getElementById('refresh-btn');
+  btn.classList.add('spinning');
+  grid.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">🔍 Scanning live odds...</div>';
+  ts.textContent='Fetching...';
+  const sports=['americanfootball_nfl','basketball_nba','baseball_mlb','icehockey_nhl','soccer_epl','basketball_ncaab'];
+  let all=[];
+  for(const sp of sports){{
+    try{{const r=await fetch(`https://api.the-odds-api.com/v4/sports/${{sp}}/odds?apiKey=${{oddsKey}}&regions=us&markets=h2h&oddsFormat=american&bookmakers=${{BOOKS.join(',')}}`);if(r.ok){{const d=await r.json();all=all.concat(d.map(g=>(({{...g,sport_key:sp}}))));}}}catch(e){{console.warn(sp,e);}}
+  }}
+  btn.classList.remove('spinning');
+  const arbs=findArbs(all);
+  document.getElementById('h-arb').textContent=arbs.length||'0';
+  ts.textContent=`Last updated ${{new Date().toLocaleTimeString()}} · ${{all.length}} games scanned`;
+  if(!arbs.length){{grid.innerHTML=`<div class="arb-empty"><div class="arb-empty-icon">🔍</div><div class="arb-empty-title">No Arbs Right Now</div><div class="arb-empty-sub">${{all.length}} games scanned.<br>Arb windows close fast — try refreshing.</div></div>`;return;}}
+  grid.innerHTML=arbs.map((a,i)=>`<div class="arb-card ${{parseFloat(a.pct)>=2?'premium':''}}" style="animation-delay:${{i*.06}}s"><div class="arb-head"><div><div class="arb-game-name">${{a.game}}</div><div class="arb-meta">${{a.sport}} · ${{a.time}}</div></div><div class="profit-block"><div class="profit-num">+${{a.pct}}%</div><div class="profit-label">Guaranteed</div></div></div><div class="arb-legs">${{a.legs.map(l=>`<div class="arb-leg"><div><span class="leg-book ${{BOOK_CSS[l.book]||'bk-default'}}">${{BOOK_NAMES[l.book]||l.book}}</span></div><div class="leg-pick">${{l.team}}</div><div class="leg-odds">${{l.odds>0?'+':''}}${{l.odds}}</div><div class="leg-stake">Stake $${{l.stake}}</div></div>`).join('')}}</div><div class="arb-summary"><div class="sum-item"><div class="sum-num">$100</div><div class="sum-label">Stake</div></div><div class="sum-item"><div class="sum-num">$${{a.profit}}</div><div class="sum-label">Profit</div></div><div class="sum-item"><div class="sum-num">${{a.impl}}%</div><div class="sum-label">Implied</div></div></div></div>`).join('');
+}}
+
+if(subscriber){{document.getElementById('sub-pill').style.display='flex';document.getElementById('live-pill').style.display='none';}}
+if(oddsKey){{document.getElementById('api-key-setup').style.display='none';}}
+buildSidebar();updateBanner();renderPicks('all');
 </script>
 </body>
 </html>"""
 
 
 def main():
-    print("🏈 SharpAI — generating today's picks…\n")
+    print("🏈 SharpAI — generating today's picks with Gemini...\n")
     all_picks = []
 
     for sport_key in SPORTS:
         label, sport_id = SPORT_LABELS[sport_key]
-        print(f"  Fetching {label} odds…")
+        print(f"  Fetching {label} odds...")
         games = fetch_odds(sport_key)
 
         if not games:
@@ -403,10 +578,9 @@ def main():
             continue
 
         games_text = "\n\n".join(summarise_game(g) for g in games)
-        print(f"  → {len(games)} game(s) found, asking Claude…")
+        print(f"  → {len(games)} game(s) found, asking Gemini...")
 
-        picks = ask_claude(games_text, label)
-        # Stamp the sport fields in case Claude omitted them
+        picks = ask_gemini(games_text, label)
         for p in picks:
             p.setdefault("sport", sport_id)
             p.setdefault("sportLabel", label)
@@ -414,7 +588,7 @@ def main():
         print(f"  → {len(picks)} pick(s) generated\n")
         all_picks.extend(picks)
 
-    date_str = datetime.now(timezone.utc).strftime("%A, %B %-d, %Y")
+    date_str = datetime.now(timezone.utc).strftime("%B %-d, %Y")
     html = build_html(all_picks, date_str)
 
     out = Path("index.html")
