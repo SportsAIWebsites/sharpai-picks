@@ -2,17 +2,15 @@ name: Generate Daily Picks
 
 on:
   schedule:
-    # Runs every day at 9:00 AM ET (1:00 PM UTC)
-    - cron: '0 13 * * *'
-  workflow_dispatch:   # allows manual trigger from GitHub UI
+    - cron: '0 13 * * *'   # 9:00 AM ET every day
+  workflow_dispatch:         # manual trigger from GitHub UI
 
 permissions:
-  contents: write      # needed to commit index.html back to the repo
+  contents: write
 
 jobs:
   generate:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -23,12 +21,12 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install anthropic requests
+        run: pip install requests
 
       - name: Generate picks
         env:
-          ODDS_API_KEY:      ${{ secrets.ODDS_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ODDS_API_KEY:   ${{ secrets.ODDS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/generate_picks.py
 
       - name: Commit & push updated index.html
