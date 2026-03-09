@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SharpAI — Daily Sports Picks</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --border: #e8eaee;
+    --text: #0d1117;
+    --text-muted: #6b7280;
+    --accent: #0057ff;
+    --accent-light: #e8f0ff;
+    --green: #00a86b;
+    --green-light: #e6f7f1;
+    --red: #e63946;
+    --red-light: #fdecea;
+    --gold: #f59e0b;
+    --gold-light: #fef3c7;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.04);
+    --shadow-hover: 0 4px 12px rgba(0,0,0,0.12), 0 8px 32px rgba(0,0,0,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Barlow', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+  }
+
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 18px;
+    color: white;
+    letter-spacing: -1px;
+  }
+
+  .logo-text {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    color: var(--text);
+    letter-spacing: 0.5px;
+  }
+
+  .logo-text span { color: var(--accent); }
+
+  nav { display: flex; align-items: center; gap: 4px; }
+
+  nav a {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    transition: all 0.15s;
+  }
+
+  nav a:hover, nav a.active {
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  nav a.active { color: var(--accent); font-weight: 600; }
+
+  .header-right { display: flex; align-items: center; gap: 12px; }
+
+  .record-badge {
+    background: var(--green-light);
+    color: var(--green);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .record-badge::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+  }
+
+  /* HERO BAND */
+  .hero-band {
+    background: linear-gradient(135deg, #0d1117 0%, #1a2235 100%);
+    padding: 48px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero-band::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, rgba(0,87,255,0.2) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero-inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 32px;
+  }
+
+  .hero-left h1 {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 48px;
+    color: white;
+    line-height: 1;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+
+  .hero-left h1 span { color: var(--accent); }
+
+  .hero-left p {
+    color: rgba(255,255,255,0.55);
+    font-size: 15px;
+    font-weight: 400;
+    max-width: 440px;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 32px;
+  }
+
+  .hero-stat {
+    text-align: center;
+  }
+
+  .hero-stat-num {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 36px;
+    color: white;
+    line-height: 1;
+  }
+
+  .hero-stat-num.green { color: var(--green); }
+
+  .hero-stat-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+  }
+
+  /* MAIN LAYOUT */
+  .main {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 28px;
+  }
+
+  /* SECTION HEADERS */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .section-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-title .dot {
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+
+  .see-all {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* SPORT FILTER TABS */
+  .filter-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .filter-tab {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    transition: all 0.15s;
+  }
+
+  .filter-tab:hover { border-color: var(--accent); color: var(--accent); }
+
+  .filter-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  /* PICK CARDS */
+  .picks-grid { display: flex; flex-direction: column; gap: 14px; }
+
+  .pick-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    box-shadow: var(--shadow);
+    transition: all 0.2s;
+    cursor: pointer;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  .pick-card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-1px);
+    border-color: #d0d7e3;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .pick-card:nth-child(1) { animation-delay: 0.05s; }
+  .pick-card:nth-child(2) { animation-delay: 0.1s; }
+  .pick-card:nth-child(3) { animation-delay: 0.15s; }
+  .pick-card:nth-child(4) { animation-delay: 0.2s; }
+  .pick-card:nth-child(5) { animation-delay: 0.25s; }
+
+  .pick-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .pick-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sport-tag {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+
+  .sport-nba { background: #fde9d3; color: #c2410c; }
+  .sport-nfl { background: #d1fae5; color: #065f46; }
+  .sport-mlb { background: #dbeafe; color: #1e40af; }
+  .sport-nhl { background: #ede9fe; color: #5b21b6; }
+  .sport-soccer { background: #fce7f3; color: #9d174d; }
+  .sport-ncaa { background: #fef3c7; color: #92400e; }
+  .sport-wnba { background: #f0fdf4; color: #166534; }
+
+  .pick-time {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  .confidence-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+
+  .conf-high { background: var(--green-light); color: var(--green); }
+  .conf-med { background: var(--gold-light); color: var(--gold); }
+  .conf-low { background: #f3f4f6; color: var(--text-muted); }
+
+  .pick-matchup {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .team {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .team-name {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    letter-spacing: 0.3px;
+  }
+
+  .team-record {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .vs-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .vs-text {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .vs-line {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--accent);
+    background: var(--accent-light);
+    padding: 3px 10px;
+    border-radius: 6px;
+  }
+
+  .pick-recommendation {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .pick-type-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .pick-value {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 20px;
+    color: var(--text);
+  }
+
+  .pick-odds {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--green);
+    margin-left: auto;
+  }
+
+  .pick-analysis {
+    font-size: 13.5px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    font-weight: 400;
+  }
+
+  .pick-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+
+  .ai-tag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .ai-tag svg { width: 13px; height: 13px; }
+
+  .pick-actions { display: flex; gap: 8px; }
+
+  .btn-save {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: none;
+    border: 1.5px solid var(--border);
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-save:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-bet {
+    font-size: 12px;
+    font-weight: 700;
+    color: white;
+    background: var(--accent);
+    border: none;
+    padding: 5px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-bet:hover { background: #0046d4; }
+
+  /* SIDEBAR */
+  .sidebar { display: flex; flex-direction: column; gap: 20px; }
+
+  .sidebar-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+
+  .sidebar-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 17px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* PARLAY CARD */
+  .parlay-card { border: 2px solid var(--accent); }
+
+  .parlay-header {
+    background: var(--accent);
+    color: white;
+    margin: -20px -20px 16px;
+    padding: 14px 20px;
+    border-radius: 10px 10px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .parlay-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 16px;
+    letter-spacing: 0.5px;
+  }
+
+  .parlay-odds {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 22px;
+  }
+
+  .parlay-leg {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .parlay-leg:last-child { border-bottom: none; }
+
+  .leg-num {
+    width: 20px; height: 20px;
+    background: var(--accent-light);
+    color: var(--accent);
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .leg-pick { font-weight: 600; flex: 1; }
+  .leg-odds { font-weight: 700; color: var(--green); font-size: 12px; }
+
+  /* STREAK TABLE */
+  .streak-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .streak-row:last-child { border-bottom: none; }
+
+  .streak-sport { font-weight: 600; }
+  .streak-record { font-weight: 700; color: var(--green); }
+  .streak-pct {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  /* TRENDING */
+  .trending-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .trending-item:last-child { border-bottom: none; }
+
+  .trending-num {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 800;
+    font-size: 18px;
+    color: var(--border);
+    width: 20px;
+    flex-shrink: 0;
+    line-height: 1.2;
+  }
+
+  .trending-text { font-weight: 500; line-height: 1.4; }
+  .trending-text strong { font-weight: 700; }
+
+  /* DATE BAR */
+  .date-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  .date-bar strong { color: var(--text); font-size: 14px; }
+
+  .date-dot { width: 4px; height: 4px; background: var(--border); border-radius: 50%; }
+
+  /* DISCLAIMER */
+  .disclaimer {
+    max-width: 1280px;
+    margin: 0 auto 40px;
+    padding: 0 24px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 900px) {
+    .main { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .hero-stats { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="logo" href="#">
+      <div class="logo-icon">SA</div>
+      <span class="logo-text">Sharp<span>AI</span></span>
+    </a>
+    <nav>
+      <a href="#" class="active">Today's Picks</a>
+      <a href="#">Parlays</a>
+      <a href="#">Records</a>
+      <a href="#">Props</a>
+      <a href="#">Analysis</a>
+    </nav>
+    <div class="header-right">
+      <div class="record-badge">Live · 68-31 Season Record</div>
+    </div>
+  </div>
+</header>
+
+<div class="hero-band">
+  <div class="hero-inner">
+    <div class="hero-left">
+      <h1>AI-POWERED<br><span>DAILY PICKS</span></h1>
+      <p>Machine learning models analyzing thousands of data points across every major sport. Updated daily by 9AM ET.</p>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="hero-stat-num green">68.7%</div>
+        <div class="hero-stat-label">Win Rate</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num">99</div>
+        <div class="hero-stat-label">Total Picks</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num green">+$4,240</div>
+        <div class="hero-stat-label">Season Units</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num">8</div>
+        <div class="hero-stat-label">Today's Picks</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="picks-col">
+
+    <div class="date-bar">
+      <strong id="today-date"></strong>
+      <div class="date-dot"></div>
+      <span>8 picks generated</span>
+      <div class="date-dot"></div>
+      <span>Updated 9:04 AM ET</span>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title"><div class="dot"></div> Today's Picks</div>
+      <a class="see-all" href="#">View All →</a>
+    </div>
+
+    <div class="filter-tabs">
+      <div class="filter-tab active" onclick="filterPicks('all', this)">All Sports</div>
+      <div class="filter-tab" onclick="filterPicks('nba', this)">NBA</div>
+      <div class="filter-tab" onclick="filterPicks('nfl', this)">NFL</div>
+      <div class="filter-tab" onclick="filterPicks('mlb', this)">MLB</div>
+      <div class="filter-tab" onclick="filterPicks('nhl', this)">NHL</div>
+      <div class="filter-tab" onclick="filterPicks('soccer', this)">Soccer</div>
+      <div class="filter-tab" onclick="filterPicks('ncaa', this)">College</div>
+      <div class="filter-tab" onclick="filterPicks('wnba', this)">Women's</div>
+    </div>
+
+    <div class="picks-grid" id="picks-grid"></div>
+  </div>
+
+  <div class="sidebar">
+
+    <!-- PARLAY OF THE DAY -->
+    <div class="sidebar-card parlay-card">
+      <div class="parlay-header">
+        <div class="parlay-title">⚡ PARLAY OF THE DAY</div>
+        <div class="parlay-odds">+620</div>
+      </div>
+      <div class="parlay-leg">
+        <div class="leg-num">1</div>
+        <div class="leg-pick">Celtics -5.5 vs Heat</div>
+        <div class="leg-odds">-110</div>
+      </div>
+      <div class="parlay-leg">
+        <div class="leg-num">2</div>
+        <div class="leg-pick">Chiefs ML vs Raiders</div>
+        <div class="leg-odds">-145</div>
+      </div>
+      <div class="parlay-leg">
+        <div class="leg-num">3</div>
+        <div class="leg-pick">Over 220.5 – Lakers/Suns</div>
+        <div class="leg-odds">-108</div>
+      </div>
+      <div class="parlay-leg">
+        <div class="leg-num">4</div>
+        <div class="leg-pick">Rangers ML vs Bruins</div>
+        <div class="leg-odds">+118</div>
+      </div>
+      <div style="margin-top:14px;">
+        <button class="btn-bet" style="width:100%;padding:10px;">Build This Parlay</button>
+      </div>
+    </div>
+
+    <!-- SEASON RECORD -->
+    <div class="sidebar-card">
+      <div class="sidebar-title">📊 Season Record by Sport</div>
+      <div class="streak-row">
+        <span class="streak-sport">NBA</span>
+        <span class="streak-record">24-9</span>
+        <span class="streak-pct">72.7%</span>
+      </div>
+      <div class="streak-row">
+        <span class="streak-sport">NFL</span>
+        <span class="streak-record">18-8</span>
+        <span class="streak-pct">69.2%</span>
+      </div>
+      <div class="streak-row">
+        <span class="streak-sport">MLB</span>
+        <span class="streak-record">12-6</span>
+        <span class="streak-pct">66.7%</span>
+      </div>
+      <div class="streak-row">
+        <span class="streak-sport">NHL</span>
+        <span class="streak-record">8-4</span>
+        <span class="streak-pct">66.7%</span>
+      </div>
+      <div class="streak-row">
+        <span class="streak-sport">Soccer</span>
+        <span class="streak-record">4-2</span>
+        <span class="streak-pct">66.7%</span>
+      </div>
+      <div class="streak-row">
+        <span class="streak-sport">College</span>
+        <span class="streak-record">2-2</span>
+        <span class="streak-pct">50.0%</span>
+      </div>
+    </div>
+
+    <!-- TRENDING -->
+    <div class="sidebar-card">
+      <div class="sidebar-title">🔥 Trending Picks</div>
+      <div class="trending-item">
+        <div class="trending-num">01</div>
+        <div class="trending-text"><strong>Celtics -5.5</strong> — 84% of sharp money on Boston tonight</div>
+      </div>
+      <div class="trending-item">
+        <div class="trending-num">02</div>
+        <div class="trending-text"><strong>Chiefs ML</strong> — 3-game home win streak vs division rivals</div>
+      </div>
+      <div class="trending-item">
+        <div class="trending-num">03</div>
+        <div class="trending-text"><strong>Over 6.5 – Dodgers/Padres</strong> — Both bullpens depleted</div>
+      </div>
+      <div class="trending-item">
+        <div class="trending-num">04</div>
+        <div class="trending-text"><strong>Man City ML</strong> — Back at home after 2-game road trip</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="disclaimer">
+  SharpAI is for entertainment purposes only. We do not encourage illegal gambling. Please gamble responsibly. If you or someone you know has a gambling problem, call 1-800-522-4700.
+</div>
+
+<script>
+  // Set today's date
+  const dateEl = document.getElementById('today-date');
+  const now = new Date();
+  dateEl.textContent = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+  const picks = [
+    {
+      sport: 'nba',
+      sportLabel: 'NBA',
+      time: '7:30 PM ET',
+      home: 'Boston Celtics', homeRecord: '51-18',
+      away: 'Miami Heat', awayRecord: '34-37',
+      line: '-5.5',
+      pickType: 'Spread',
+      pickValue: 'Celtics -5.5',
+      odds: '-110',
+      confidence: 'high',
+      analysis: 'Boston is 14-4 ATS at home this season and has covered in 6 straight games against sub-.500 opponents. Miami ranks 28th in defensive efficiency on the road. Jayson Tatum averaging 34 pts over his last 5 home games.',
+      ai: 'Model confidence: 81% — based on 14 predictive signals'
+    },
+    {
+      sport: 'nfl',
+      sportLabel: 'NFL',
+      time: '4:25 PM ET',
+      home: 'Kansas City Chiefs', homeRecord: '11-4',
+      away: 'Las Vegas Raiders', awayRecord: '4-11',
+      line: 'ML',
+      pickType: 'Moneyline',
+      pickValue: 'Chiefs ML',
+      odds: '-145',
+      confidence: 'high',
+      analysis: 'Kansas City is 8-1 SU at home this season and has not lost to a division rival in 9 straight meetings. The Raiders rank last in opposing QBR allowed. Mahomes is 22-4 in home divisional games.',
+      ai: 'Model confidence: 78% — based on 19 predictive signals'
+    },
+    {
+      sport: 'nhl',
+      sportLabel: 'NHL',
+      time: '7:00 PM ET',
+      home: 'New York Rangers', homeRecord: '34-21',
+      away: 'Boston Bruins', awayRecord: '31-24',
+      line: 'ML',
+      pickType: 'Moneyline',
+      pickValue: 'Rangers ML',
+      odds: '+118',
+      confidence: 'med',
+      analysis: 'Igor Shesterkin has a .931 SV% in his last 8 home starts and Rangers are 7-1 SU in that span. Boston is playing their 3rd game in 4 nights. Slight fatigue edge to New York here.',
+      ai: 'Model confidence: 64% — based on 11 predictive signals'
+    },
+    {
+      sport: 'nba',
+      sportLabel: 'NBA',
+      time: '10:00 PM ET',
+      home: 'Phoenix Suns', homeRecord: '28-41',
+      away: 'Los Angeles Lakers', awayRecord: '37-32',
+      line: 'O 220.5',
+      pickType: 'Over/Under',
+      pickValue: 'Over 220.5',
+      odds: '-108',
+      confidence: 'high',
+      analysis: 'Both teams rank in the bottom 10 in defensive rating over the last 15 games. This matchup has gone over in 7 of the last 9 meetings. LeBron and KD both playing at a high pace in recent outings.',
+      ai: 'Model confidence: 74% — based on 16 predictive signals'
+    },
+    {
+      sport: 'soccer',
+      sportLabel: 'Soccer',
+      time: '3:00 PM ET',
+      home: 'Manchester City', homeRecord: 'W4 L1',
+      away: 'Chelsea FC', awayRecord: 'W2 L3',
+      line: 'ML',
+      pickType: 'Moneyline',
+      pickValue: 'Man City ML',
+      odds: '-165',
+      confidence: 'high',
+      analysis: 'City are unbeaten in 11 straight home Premier League fixtures. Haaland has scored in 4 consecutive home appearances. Chelsea have conceded 2+ goals in 6 of their last 8 away matches.',
+      ai: 'Model confidence: 76% — based on 13 predictive signals'
+    },
+    {
+      sport: 'mlb',
+      sportLabel: 'MLB',
+      time: '8:10 PM ET',
+      home: 'San Diego Padres', homeRecord: '42-38',
+      away: 'Los Angeles Dodgers', awayRecord: '51-28',
+      line: 'O 6.5',
+      pickType: 'Over/Under',
+      pickValue: 'Over 6.5',
+      odds: '-115',
+      confidence: 'med',
+      analysis: 'Both starting pitchers have ERAs above 4.50 over the last month. Petco Park wind conditions favor offense tonight. Dodgers bullpen has allowed 4+ runs in 3 of their last 5 games.',
+      ai: 'Model confidence: 61% — based on 9 predictive signals'
+    },
+    {
+      sport: 'ncaa',
+      sportLabel: 'College',
+      time: '9:00 PM ET',
+      home: 'Duke Blue Devils', homeRecord: '22-6',
+      away: 'North Carolina', awayRecord: '18-10',
+      line: '-4.5',
+      pickType: 'Spread',
+      pickValue: 'Duke -4.5',
+      odds: '-110',
+      confidence: 'med',
+      analysis: 'Duke is 9-2 ATS at home this season in ACC play. The rivalry factor is real but Cooper Flagg has been dominant in his last 3 home games averaging 27.4 pts. UNC ranks 9th in opponent FG% allowed on the road.',
+      ai: 'Model confidence: 63% — based on 10 predictive signals'
+    },
+    {
+      sport: 'wnba',
+      sportLabel: "Women's",
+      time: '7:00 PM ET',
+      home: 'New York Liberty', homeRecord: '28-8',
+      away: 'Las Vegas Aces', awayRecord: '24-12',
+      line: '-3.5',
+      pickType: 'Spread',
+      pickValue: 'Liberty -3.5',
+      odds: '-112',
+      confidence: 'high',
+      analysis: 'New York is 11-3 ATS at home this season and leads the WNBA in net rating (+9.4). Breanna Stewart averaging 26.1 pts over her last 8 games. Vegas is 3-7 ATS in their last 10 road games.',
+      ai: 'Model confidence: 72% — based on 12 predictive signals'
+    }
+  ];
+
+  function confidenceClass(c) {
+    if (c === 'high') return 'conf-high';
+    if (c === 'med') return 'conf-med';
+    return 'conf-low';
+  }
+
+  function confidenceLabel(c) {
+    if (c === 'high') return '🔥 High Confidence';
+    if (c === 'med') return '⚡ Medium Confidence';
+    return 'Low Confidence';
+  }
+
+  function sportClass(s) {
+    const map = { nba: 'sport-nba', nfl: 'sport-nfl', mlb: 'sport-mlb', nhl: 'sport-nhl', soccer: 'sport-soccer', ncaa: 'sport-ncaa', wnba: 'sport-wnba' };
+    return map[s] || 'sport-nba';
+  }
+
+  function renderPicks(filter) {
+    const grid = document.getElementById('picks-grid');
+    const filtered = filter === 'all' ? picks : picks.filter(p => p.sport === filter);
+    grid.innerHTML = filtered.map((p, i) => `
+      <div class="pick-card" style="animation-delay:${i * 0.06}s">
+        <div class="pick-top">
+          <div class="pick-meta">
+            <span class="sport-tag ${sportClass(p.sport)}">${p.sportLabel}</span>
+            <span class="pick-time">${p.time}</span>
+          </div>
+          <div class="confidence-badge ${confidenceClass(p.confidence)}">${confidenceLabel(p.confidence)}</div>
+        </div>
+        <div class="pick-matchup">
+          <div class="team">
+            <div class="team-name">${p.away}</div>
+            <div class="team-record">${p.awayRecord}</div>
+          </div>
+          <div class="vs-block">
+            <span class="vs-text">vs</span>
+            <span class="vs-line">${p.line}</span>
+          </div>
+          <div class="team" style="text-align:right">
+            <div class="team-name">${p.home}</div>
+            <div class="team-record">${p.homeRecord}</div>
+          </div>
+        </div>
+        <div class="pick-recommendation">
+          <span class="pick-type-label">${p.pickType}</span>
+          <span class="pick-value">${p.pickValue}</span>
+          <span class="pick-odds">${p.odds}</span>
+        </div>
+        <div class="pick-analysis">${p.analysis}</div>
+        <div class="pick-footer">
+          <span class="ai-tag">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+            ${p.ai}
+          </span>
+          <div class="pick-actions">
+            <button class="btn-save">Save</button>
+            <button class="btn-bet">Bet This Pick →</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function filterPicks(sport, el) {
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    renderPicks(sport);
+  }
+
+  renderPicks('all');
+</script>
+</body>
+</html>
